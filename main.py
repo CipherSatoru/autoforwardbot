@@ -1753,5 +1753,28 @@ async def main():
     # Keep running
     await asyncio.Event().wait()
 
+async def signal_handler(sig, frame):
+    """Handle termination signals for graceful shutdown."""
+    logger.warning(f"Received signal {sig.name}. Shutting down gracefully...")
+    # Stop the bot's polling
+    if application: # Check if application is initialized
+        await application.stop()
+    # Stop the uvicorn server
+    if server: # Check if server is initialized
+        await server.shutdown()
+    logger.info("Shutdown complete. Exiting.")
+    sys.exit(0)
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Register signal handlers for graceful shutdown
+    loop = asyncio.get_event_loop()
+    for sig in (asyncio.signal.SIGTERM, asyncio.signal.SIGINT):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(signal_handler(s, None)))
+    
+    # Start the FastAPI server in the background
+    config_server = uvicorn.Config(fastapi_app, host="0.0.0.0", port=10000, log_level="info")
+    server = uvicorn.Server(config_server)
+    asyncio.create_task(server.serve())
+    
+    # Start the bot polling
+    asyncio.run(application.run_polling())
