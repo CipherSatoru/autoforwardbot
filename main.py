@@ -8,7 +8,7 @@ import logging
 import re # Import re module for regex operations
 import uvicorn
 from api import app as fastapi_app
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
     CallbackQueryHandler, ConversationHandler, filters as tg_filters, ContextTypes
@@ -48,6 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [InlineKeyboardButton("🚀 Quick Start Wizard", callback_data="guide_1")],
+        [InlineKeyboardButton("📱 Open Mini App Dashboard", web_app=WebAppInfo(url="https://your-mini-app.vercel.app"))],
         [InlineKeyboardButton("➕ Create New Task", callback_data="newtask")],
         [InlineKeyboardButton("📋 My Tasks", callback_data="mytasks"), InlineKeyboardButton("📊 My Stats", callback_data="stats_user")],
         [InlineKeyboardButton("❓ Help Center", callback_data="help_main")]
