@@ -167,6 +167,54 @@ async def login_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 
+# ========== ONBOARDING GUIDE STEPS ==========
+async def onboarding_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the multi-step interactive guide"""
+    query = update.callback_query
+    await query.answer()
+    
+    step_data = query.data.split("_")
+    if len(step_data) < 2:
+        return
+    step = int(step_data[1])
+    
+    if step == 1:
+        text = (
+            "🚀 <b>Step 1: The Basics</b>\n\n"
+            "To forward messages, you need a <b>Source</b> (where messages come from) and a <b>Destination</b> (where they go).\n\n"
+            "💡 <i>Tip: The bot must be an Admin in the destination to post messages!</i>"
+        )
+        keyboard = [[InlineKeyboardButton("Next: Adding Chats ➡️", callback_data="guide_2")]]
+        
+    elif step == 2:
+        text = (
+            "📂 <b>Step 2: Selecting Chats</b>\n\n"
+            "When you create a task, you can simply <b>forward a message</b> from the chat to the bot.\n\n"
+            "The bot will automatically detect the Chat ID and Title. No typing required!"
+        )
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="guide_1")],
+            [InlineKeyboardButton("Next: Pro Features ➡️", callback_data="guide_3")]
+        ]
+        
+    elif step == 3:
+        text = (
+            "✨ <b>Step 3: Pro Customization</b>\n\n"
+            "Once a task is created, use <b>Edit Task</b> to:\n"
+            "• Add Watermarks 💧\n"
+            "• Auto-Translate 🌐\n"
+            "• Filter keywords or users 🛠️\n\n"
+            "Ready to try?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="guide_2")],
+            [InlineKeyboardButton("🚀 Create My First Task", callback_data="newtask")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="start_menu")]
+        ]
+        
+    await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 # ========== FORWARD TASK MANAGEMENT ==========
 async def newtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create a new forward task with interactive selection"""
