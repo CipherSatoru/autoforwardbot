@@ -27,8 +27,7 @@ def validate_telegram_data(init_data: str):
         if not hash_str:
             return False
             
-        data_check_string = "
-".join([f"{k}={v}" for k, v in sorted(vals.items())])
+        data_check_string = "\n".join([f"{k}={v}" for k, v in sorted(vals.items())])
         secret_key = hmac.new("WebAppData".encode(), config.BOT_TOKEN.encode(), hashlib.sha256).digest()
         hmac_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         
