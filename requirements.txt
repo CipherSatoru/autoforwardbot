@@ -10,3 +10,4 @@ aiofiles==23.2.1
 fastapi
 uvicorn
 httpx
+telethon

@@ -5,8 +5,10 @@ Main Bot File with All Commands
 """
 import asyncio
 import logging
-import re # Import re module for regex operations
+import re
 import uvicorn
+import os
+from telethon import TelegramClient, events
 from api import app as fastapi_app
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
@@ -28,10 +30,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states for task creation and editing
-# Added states for filter management and regex filter specifics
 STATE_AWAITING_SOURCE, STATE_AWAITING_DEST, STATE_MANAGE_FILTERS, \
 STATE_ADD_FILTER_TYPE, STATE_ADD_FILTER_VALUE, STATE_ADD_FILTER_MODE, \
-STATE_ADD_REGEX_VALUE = range(7) # Added STATE_ADD_REGEX_VALUE, though not strictly needed for this change yet
+STATE_ADD_REGEX_VALUE, STATE_WAITING_PHONE, STATE_WAITING_OTP = range(9)
+
+# Global dictionary to store temporary Telethon clients during login
+user_clients = {}
 
 # ========== START & HELP ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,48 +92,79 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(help_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ========== ONBOARDING GUIDE STEPS ==========
-async def onboarding_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the multi-step interactive guide"""
-    query = update.callback_query
-    await query.answer()
-    
-    step = int(query.data.split("_")[1])
-    
-    if step == 1:
-        text = (
-            "🚀 <b>Step 1: The Basics</b>\n\n"
-            "To forward messages, you need a <b>Source</b> (where messages come from) and a <b>Destination</b> (where they go).\n\n"
-            "💡 <i>Tip: The bot must be an Admin in the destination to post messages!</i>"
-        )
-        keyboard = [[InlineKeyboardButton("Next: Adding Chats ➡️", callback_data="guide_2")]]
-        
-    elif step == 2:
-        text = (
-            "📂 <b>Step 2: Selecting Chats</b>\n\n"
-            "When you create a task, you can simply <b>forward a message</b> from the chat to the bot.\n\n"
-            "The bot will automatically detect the Chat ID and Title. No typing required!"
-        )
-        keyboard = [
-            [InlineKeyboardButton("⬅️ Back", callback_data="guide_1")],
-            [InlineKeyboardButton("Next: Pro Features ➡️", callback_data="guide_3")]
-        ]
-        
-    elif step == 3:
-        text = (
-            "✨ <b>Step 3: Pro Customization</b>\n\n"
-            "Once a task is created, use <b>Edit Task</b> to:\n"
-            "• Add Watermarks 💧\n"
-            "• Auto-Translate 🌐\n"
-            "• Filter keywords or users 🛠️\n\n"
-            "Ready to try?"
-        )
-        keyboard = [
-            [InlineKeyboardButton("⬅️ Back", callback_data="guide_2")],
-            [InlineKeyboardButton("🚀 Create My First Task", callback_data="newtask")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="start_menu")]
-        ]
-        
     await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# ========== USERBOT LOGIN FLOW ==========
+async def login_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the Userbot login process"""
+    await update.message.reply_text(
+        "🔐 <b>Platinum Userbot Login</b>\n\n"
+        "To forward from protected channels, I need to act as your account.\n\n"
+        "Please send your <b>Phone Number</b> in international format.\n"
+        "Example: <code>+1234567890</code>",
+        parse_mode=ParseMode.HTML
+    )
+    return STATE_WAITING_PHONE
+
+async def login_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle phone number input and send OTP"""
+    phone = update.message.text.strip()
+    user_id = update.effective_user.id
+    
+    if not config.API_ID or not config.API_HASH or config.API_ID == 'YOUR_API_ID':
+        await update.message.reply_text("❌ Userbot is not configured on the server. Please set API_ID and API_HASH in config.")
+        return ConversationHandler.END
+
+    try:
+        session_path = f"sessions/user_{user_id}"
+        os.makedirs("sessions", exist_ok=True)
+        
+        client = TelegramClient(session_path, int(config.API_ID), config.API_HASH)
+        await client.connect()
+        
+        # Send code request
+        result = await client.send_code_request(phone)
+        context.user_data['phone'] = phone
+        context.user_data['phone_code_hash'] = result.phone_code_hash
+        user_clients[user_id] = client
+        
+        await update.message.reply_text(
+            "📨 <b>OTP Sent!</b>\n\nPlease send the code you received from Telegram.\n\n"
+            "💡 <i>Tip: If the code is 12345, send it directly.</i>",
+            parse_mode=ParseMode.HTML
+        )
+        return STATE_WAITING_OTP
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+        return ConversationHandler.END
+
+async def login_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle OTP input and finalize login"""
+    otp = update.message.text.strip()
+    user_id = update.effective_user.id
+    phone = context.user_data.get('phone')
+    phone_code_hash = context.user_data.get('phone_code_hash')
+    client = user_clients.get(user_id)
+
+    if not client:
+        await update.message.reply_text("❌ Session expired. Please start over with /login.")
+        return ConversationHandler.END
+
+    try:
+        await client.sign_in(phone, otp, phone_code_hash=phone_code_hash)
+        if not await client.is_user_authorized():
+             await update.message.reply_text("🔐 2-Step Verification is enabled. Please disable it to use this feature.")
+             return ConversationHandler.END
+             
+        await update.message.reply_text(
+            "✅ <b>Success! Account Connected.</b>\n\nYou can now forward from protected and private channels using the Platinum Dashboard.",
+            parse_mode=ParseMode.HTML
+        )
+        await client.disconnect()
+        return ConversationHandler.END
+    except Exception as e:
+        await update.message.reply_text(f"❌ Login failed: {str(e)}")
+        return ConversationHandler.END
 
 
 # ========== FORWARD TASK MANAGEMENT ==========
@@ -1613,6 +1648,17 @@ async def main():
     
     # Add the conversation handler for adding filters
     application.add_handler(add_filter_conv_handler)
+    
+    # Userbot login conversation handler
+    login_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("login", login_start)],
+        states={
+            STATE_WAITING_PHONE: [MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, login_phone)],
+            STATE_WAITING_OTP: [MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, login_otp)],
+        },
+        fallbacks=[CommandHandler("cancel", lambda u, c: u.message.reply_text("Login cancelled.") or ConversationHandler.END)],
+    )
+    application.add_handler(login_conv_handler)
     
     # Message handler for forwarding and task creation steps
     application.add_handler(MessageHandler(

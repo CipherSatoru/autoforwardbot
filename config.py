@@ -11,6 +11,11 @@ load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '123456789').split(',')))
 
+# Userbot (Telethon) Configuration
+# Get these from https://my.telegram.org
+API_ID = os.getenv('API_ID', 'YOUR_API_ID')
+API_HASH = os.getenv('API_HASH', 'YOUR_API_HASH')
+
 # Database
 DATABASE_FILE = 'forward_bot.db'
 

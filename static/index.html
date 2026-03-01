@@ -185,6 +185,32 @@
                     </div>
 
                     <div className="space-y-4">
+                        {/* Userbot Card */}
+                        <div className="card p-6 border-2 border-blue-500/20 bg-blue-500/5 mb-6">
+                            <div className="flex items-center gap-4 mb-4">
+                                <div className="bg-blue-500 p-3 rounded-2xl shadow-lg shadow-blue-500/20 text-white">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                </div>
+                                <div>
+                                    <h3 className="font-black text-sm uppercase tracking-tighter leading-none">Platinum Userbot</h3>
+                                    <p className="text-[10px] opacity-50 font-black uppercase mt-1">Restricted Content Support</p>
+                                </div>
+                            </div>
+                            <p className="text-[11px] font-bold opacity-60 mb-6 leading-relaxed">Connect your account to sync from <b>protected channels</b> where normal bots are blocked.</p>
+                            <button 
+                                onClick={() => {
+                                    tg.showPopup({
+                                        title: "Connect Account",
+                                        message: "Please return to the bot chat and send /login to securely connect your Telegram account.",
+                                        buttons: [{type: 'close', text: 'GOT IT'}]
+                                    });
+                                }}
+                                className="w-full py-3 rounded-xl bg-blue-500 text-white font-black text-[10px] tracking-widest active:scale-95 transition-all shadow-lg shadow-blue-500/20"
+                            >
+                                CONNECT TELEGRAM
+                            </button>
+                        </div>
+
                         {tasks.length === 0 && !loading ? (
                             <div className="card p-12 text-center">
                                 <p className="font-black opacity-30 text-lg uppercase tracking-tighter">No sync tasks found</p>
