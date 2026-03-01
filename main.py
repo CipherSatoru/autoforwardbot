@@ -471,7 +471,7 @@ async def edittask_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"⚙️ <b>Task Configuration: {task_id}</b>\n\n"
         f"<b>Source:</b> <code>{task['source_chat_title']}</code>\n"
-        f"<b>Dest:</b> <code>{task['destination_chat_title'] Julie}</code>\n"
+        f"<b>Dest:</b> <code>{task['destination_chat_title']}</code>\n"
         f"<b>Status:</b> {status_emoji} {status_text}\n\n"
         f"<i>Select a setting to modify:</i>"
     )
