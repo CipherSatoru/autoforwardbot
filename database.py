@@ -174,15 +174,16 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
     
-    async def get_tasks_by_source(self, source_chat_id: int) -> List[Dict]:
-        """Get all active tasks for a specific source chat ID"""
+    async def get_tasks_by_source(self, source_chat_id: Any) -> List[Dict]:
+        """Get all active tasks for a specific source chat ID (supports int or str)"""
         async with aiosqlite.connect(self.db_file) as db:
             db.row_factory = aiosqlite.Row
-            # We use CAST(source_chat_id AS TEXT) if it's stored as text, 
-            # but schema says INTEGER. Let's try matching both or use simple match.
+            # Search for the exact ID (int) or the username (str)
             async with db.execute('''
-                SELECT * FROM forward_tasks WHERE source_chat_id = ? AND is_enabled = 1
-            ''', (source_chat_id,)) as cursor:
+                SELECT * FROM forward_tasks 
+                WHERE (source_chat_id = ? OR source_chat_id = ?) 
+                AND is_enabled = 1
+            ''', (str(source_chat_id), source_chat_id)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
     

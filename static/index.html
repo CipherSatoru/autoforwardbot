@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Platinum Forwarder</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .tg-bg { background-color: var(--tg-theme-bg-color, #f1f1f1); }
+        .tg-text { color: var(--tg-theme-text-color, #000); }
+        .tg-secondary-bg { background-color: var(--tg-theme-secondary-bg-color, #ffffff); }
+        .card { background-color: var(--tg-theme-secondary-bg-color, #ffffff); border-radius: 24px; }
+    </style>
+</head>
+<body class="tg-bg tg-text min-h-screen pb-20">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [tasks, setTasks] = useState([]);
+            const [stats, setStats] = useState({ total: 0, active: 0 });
+            const [loading, setLoading] = useState(true);
+            const tg = window.Telegram.WebApp;
+
+            useEffect(() => {
+                tg.ready();
+                tg.expand();
+                fetchData();
+                
+                tg.MainButton.setParams({
+                    text: '➕ CREATE NEW TASK',
+                    is_visible: true,
+                    color: tg.themeParams.button_color || '#2481cc'
+                });
+
+                const handleMainButton = () => {
+                    tg.close(); // Return to bot for creation flow
+                };
+
+                tg.MainButton.onClick(handleMainButton);
+                return () => tg.MainButton.offClick(handleMainButton);
+            }, []);
+
+            const fetchData = async () => {
+                try {
+                    const auth = tg.initData;
+                    // Fetch real tasks from our FastAPI backend
+                    const res = await fetch('/api/tasks', {
+                        headers: { 'Authorization': auth }
+                    });
+                    const data = await res.json();
+                    setTasks(Array.isArray(data) ? data : []);
+                    setStats({ total: data.reduce((acc, t) => acc + (t.messages_count || 0), 0), active: data.length });
+                } catch (e) {
+                    console.error("Failed to fetch tasks", e);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const toggleTask = async (id, currentStatus) => {
+                const auth = tg.initData;
+                const newStatus = currentStatus ? 0 : 1;
+                await fetch(`/api/tasks/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': auth, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_enabled: newStatus })
+                });
+                fetchData();
+            };
+
+            return (
+                <div className="p-5 max-w-lg mx-auto">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-black text-xl shadow-lg">
+                                {tg.initDataUnsafe?.user?.first_name?.[0] || 'P'}
+                            </div>
+                            <div>
+                                <h1 className="font-black text-xl leading-tight">Platinum Dashboard</h1>
+                                <p className="text-xs opacity-50 font-bold uppercase tracking-widest">Premium Sync Pro</p>
+                            </div>
+                        </div>
+                        <div className="bg-blue-500/10 p-2 rounded-xl">
+                            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                        </div>
+                    </div>
+
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-2 gap-4 mb-10">
+                        <div className="card p-5 shadow-sm">
+                            <p className="text-[10px] font-black uppercase opacity-40 mb-1">Messages Sync'd</p>
+                            <h2 className="text-3xl font-black text-blue-500">{stats.total}</h2>
+                        </div>
+                        <div className="card p-5 shadow-sm">
+                            <p className="text-[10px] font-black uppercase opacity-40 mb-1">Active Channels</p>
+                            <h2 className="text-3xl font-black text-green-500">{stats.active}</h2>
+                        </div>
+                    </div>
+
+                    {/* Tasks List */}
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-black text-sm uppercase tracking-widest opacity-40">Your Active Flows</h3>
+                        <div className="h-[1px] flex-1 bg-current opacity-10 mx-4"></div>
+                    </div>
+
+                    {loading ? (
+                        <div className="text-center py-10 opacity-50 font-bold italic">Loading Platinum Streams...</div>
+                    ) : tasks.length === 0 ? (
+                        <div className="card p-10 text-center opacity-50">
+                            <p className="font-bold">No active tasks found.</p>
+                            <p className="text-xs mt-2">Use the bot to create your first sync!</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {tasks.map(task => (
+                                <div key={task.task_id} className="card p-5 shadow-sm border border-black/5">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div>
+                                            <p className="text-[10px] font-bold text-blue-500 uppercase mb-1">ID: {task.task_id}</p>
+                                            <h4 className="font-black text-lg">{task.source_chat_title}</h4>
+                                            <p className="text-xs opacity-50 font-bold">To: {task.destination_chat_title}</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => toggleTask(task.task_id, task.is_enabled)}
+                                            className={`px-4 py-2 rounded-full text-[10px] font-black transition-all ${task.is_enabled ? 'bg-green-500 text-white' : 'bg-red-500/10 text-red-500'}`}
+                                        >
+                                            {task.is_enabled ? 'ACTIVE' : 'PAUSED'}
+                                        </button>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <div className="bg-black/5 px-3 py-1 rounded-lg text-[10px] font-bold">⏱️ {task.forward_delay}s Delay</div>
+                                        {task.translate_to && task.translate_to !== 'none' && (
+                                            <div className="bg-purple-500/10 text-purple-500 px-3 py-1 rounded-lg text-[10px] font-bold uppercase">🌐 {task.translate_to}</div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Pro Tools Grid */}
+                    <div className="mt-12 grid grid-cols-2 gap-4">
+                        <Tool icon="💧" title="Watermark" />
+                        <Tool icon="🤖" title="AI Rewrite" />
+                        <Tool icon="📊" title="Logs" />
+                        <Tool icon="⚙️" title="Expert" />
+                    </div>
+                </div>
+            );
+        }
+
+        function Tool({ icon, title }) {
+            return (
+                <div className="card p-4 flex items-center gap-3 shadow-sm border border-black/5 opacity-50 grayscale cursor-not-allowed">
+                    <span className="text-xl">{icon}</span>
+                    <span className="font-black text-xs uppercase">{title}</span>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1490,12 +1490,13 @@ add_filter_conv_handler = ConversationHandler(
 async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages (forwarding logic)"""
     # Determine the message source (private chat message or channel post)
-    message = update.message or update.channel_post
+    message = update.message or update.channel_post or update.edited_channel_post
     if not message:
         return
 
     chat_id = message.chat.id
-    # logger.info(f"Received message from chat {chat_id} ({message.chat.title or 'Private'})")
+    # High-visibility log for Render
+    print(f"DEBUG: New message from {chat_id} ({message.chat.title or 'Private'})")
 
     # Check for new task flow (structured via ConversationHandler states)
     if context.user_data.get('awaiting_source'):
@@ -1503,35 +1504,21 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
     elif context.user_data.get('awaiting_dest'):
         return await handle_dest_selection(update, context)
 
-    # Check if this message is a setting input
-    editing_task_id = context.user_data.get('editing_setting_for_task')
-    if editing_task_id:
-        # Example: handle delay setting via direct text input if prompted
-        setting_type = context.user_data.get('editing_setting_type')
-        if setting_type == 'delay':
-             try:
-                 delay = int(message.text)
-                 await db.update_task(editing_task_id, forward_delay=delay)
-                 await message.reply_text(f"✅ Delay updated to {delay}s for task {editing_task_id}.")
-                 context.user_data.pop('editing_setting_for_task', None)
-                 context.user_data.pop('editing_setting_type', None)
-                 return
-             except ValueError:
-                 await message.reply_text("❌ Please enter a valid number for delay.")
-                 return
-
     # MAIN FORWARDING LOGIC
-    # We use chat_id (source) to find any active tasks
     try:
+        # Check by numeric ID first
         tasks = await db.get_tasks_by_source(chat_id)
+        
+        # If not found and it's a channel, try by username
+        if not tasks and message.chat.username:
+            tasks = await db.get_tasks_by_source(f"@{message.chat.username}")
+
         if not tasks:
-            # logger.info(f"No active tasks found for source {chat_id}")
             return
 
-        # logger.info(f"Found {len(tasks)} tasks for source {chat_id}")
+        print(f"DEBUG: Found {len(tasks)} tasks for source {chat_id}")
 
         for task in tasks:
-            # The db query already filters for is_enabled = 1, but double check
             if not task.get('is_enabled', 1):
                 continue
             
@@ -1539,11 +1526,17 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
             filters_list = await db.get_task_filters(task['task_id'])
             
             # Forward via engine
-            # logger.info(f"Processing task {task['task_id']} -> Dest {task['destination_chat_id']}")
-            await forward_engine.forward_message(context.bot, message, task, filters_list)
+            print(f"DEBUG: Forwarding task {task['task_id']} to {task['destination_chat_id']}")
+            success = await forward_engine.forward_message(context.bot, message, task, filters_list)
+            
+            if success:
+                print(f"DEBUG: Successfully forwarded message from {chat_id} to {task['destination_chat_id']}")
+            else:
+                print(f"DEBUG: Forwarding failed or blocked by filters for task {task['task_id']}")
             
     except Exception as e:
         logger.error(f"Error in handle_incoming_message: {e}", exc_info=True)
+        print(f"DEBUG ERROR: {e}")
 
 
 # ========== MAIN FUNCTION ==========
@@ -1615,10 +1608,8 @@ async def main():
     application.add_handler(add_filter_conv_handler)
     
     # Message handler for forwarding and task creation steps
-    # This needs to be carefully ordered. ConversationHandler states should take precedence.
-    # Messages not handled by conversations will go here.
     application.add_handler(MessageHandler(
-        tg_filters.ALL & ~tg_filters.COMMAND, # Handle all message types except commands
+        (tg_filters.ALL | tg_filters.ChatType.CHANNEL) & ~tg_filters.COMMAND,
         handle_incoming_message
     ))
     

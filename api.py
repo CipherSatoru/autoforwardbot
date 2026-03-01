@@ -1,8 +1,11 @@
 from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import hmac
 import hashlib
 import json
+import os
 from urllib.parse import parse_qs
 from typing import List, Optional
 import config
@@ -13,13 +16,25 @@ app = FastAPI(title="Platinum Forwarder API")
 # Enable CORS for the Mini App
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, replace with your Mini App URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-def validate_telegram_data(init_data: str):
+# Mount static files
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+@app.get("/")
+async def serve_index():
+    return FileResponse(os.path.join(static_dir, "index.html"))
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
     """Validate data received from Telegram Mini App"""
     try:
         vals = {k: v[0] for k, v in parse_qs(init_data).items()}
