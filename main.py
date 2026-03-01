@@ -98,10 +98,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def login_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start the Userbot login process"""
     await update.message.reply_text(
-        "🔐 <b>Platinum Userbot Login</b>\n\n"
-        "To forward from protected channels, I need to act as your account.\n\n"
-        "Please send your <b>Phone Number</b> in international format.\n"
-        "Example: <code>+1234567890</code>",
+        "⚡ <b>Platinum Connect</b>\n\n"
+        "Connect your account to enable high-speed syncing and support for <b>restricted/private</b> channels.\n\n"
+        "📱 <b>Please send your Phone Number</b>\n"
+        "Format: <code>+1234567890</code>",
         parse_mode=ParseMode.HTML
     )
     return STATE_WAITING_PHONE
@@ -111,15 +111,15 @@ async def login_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = update.message.text.strip()
     user_id = update.effective_user.id
     
-    if not config.API_ID or not config.API_HASH or config.API_ID == 'YOUR_API_ID':
-        await update.message.reply_text("❌ Userbot is not configured on the server. Please set API_ID and API_HASH in config.")
-        return ConversationHandler.END
+    # Use defaults from config automatically
+    api_id = config.API_ID
+    api_hash = config.API_HASH
 
     try:
         session_path = f"sessions/user_{user_id}"
         os.makedirs("sessions", exist_ok=True)
         
-        client = TelegramClient(session_path, int(config.API_ID), config.API_HASH)
+        client = TelegramClient(session_path, api_id, api_hash)
         await client.connect()
         
         # Send code request
@@ -129,13 +129,14 @@ async def login_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_clients[user_id] = client
         
         await update.message.reply_text(
-            "📨 <b>OTP Sent!</b>\n\nPlease send the code you received from Telegram.\n\n"
-            "💡 <i>Tip: If the code is 12345, send it directly.</i>",
+            "📨 <b>Confirmation Code Sent!</b>\n\nPlease enter the code Telegram just sent to your account.\n\n"
+            "💡 <i>Check your other Telegram app for the message from 'Telegram'.</i>",
             parse_mode=ParseMode.HTML
         )
         return STATE_WAITING_OTP
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
+        logger.error(f"Login error for {user_id}: {e}")
+        await update.message.reply_text("❌ Connection failed. Please ensure the phone number is correct and try again.")
         return ConversationHandler.END
 
 async def login_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
