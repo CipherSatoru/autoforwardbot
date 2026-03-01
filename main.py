@@ -48,7 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [InlineKeyboardButton("🚀 Quick Start Wizard", callback_data="guide_1")],
-        [InlineKeyboardButton("📱 Open Mini App Dashboard", web_app=WebAppInfo(url="https://your-mini-app.vercel.app"))],
+        [InlineKeyboardButton("📱 Open Mini App Dashboard", web_app=WebAppInfo(url="https://autoforwardbot-0ub6.onrender.com"))],
         [InlineKeyboardButton("➕ Create New Task", callback_data="newtask")],
         [InlineKeyboardButton("📋 My Tasks", callback_data="mytasks"), InlineKeyboardButton("📊 My Stats", callback_data="stats_user")],
         [InlineKeyboardButton("❓ Help Center", callback_data="help_main")]
