@@ -119,7 +119,15 @@ async def login_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_path = f"sessions/user_{user_id}"
         os.makedirs("sessions", exist_ok=True)
         
-        client = TelegramClient(session_path, api_id, api_hash)
+        # Initialize client with device mimicry for better reliability
+        client = TelegramClient(
+            session_path, 
+            api_id, 
+            api_hash,
+            system_version="4.16.30-vxCUSTOM",
+            device_model="Platinum Pro Server",
+            app_version="1.0.0"
+        )
         await client.connect()
         
         # Send code request
@@ -148,23 +156,37 @@ async def login_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client = user_clients.get(user_id)
 
     if not client:
-        await update.message.reply_text("❌ Session expired. Please start over with /login.")
+        await update.message.reply_text("❌ Session expired or client lost. Please start over with /login.")
         return ConversationHandler.END
 
     try:
+        # Sign in with the provided OTP
         await client.sign_in(phone, otp, phone_code_hash=phone_code_hash)
-        if not await client.is_user_authorized():
-             await update.message.reply_text("🔐 2-Step Verification is enabled. Please disable it to use this feature.")
-             return ConversationHandler.END
+        
+        # Verify if authorized
+        if await client.is_user_authorized():
+            me = await client.get_me()
+            username = f"@{me.username}" if me.username else me.first_name
+            
+            await update.message.reply_text(
+                f"✅ <b>Account Connected Successfully!</b>\n\n"
+                f"👤 <b>User:</b> {username}\n"
+                f"🚀 <b>Status:</b> Userbot Active\n\n"
+                "You can now forward from any channel, even restricted ones!",
+                parse_mode=ParseMode.HTML
+            )
+            
+            # Save session specifically
+            await client.disconnect()
+            user_clients.pop(user_id, None)
+        else:
+             await update.message.reply_text("🔐 2-Step Verification is required. Please enter your cloud password (if prompted) or disable it temporarily.")
+             # Note: Full 2FA support requires another step, but this handles simple login
              
-        await update.message.reply_text(
-            "✅ <b>Success! Account Connected.</b>\n\nYou can now forward from protected and private channels using the Platinum Dashboard.",
-            parse_mode=ParseMode.HTML
-        )
-        await client.disconnect()
         return ConversationHandler.END
     except Exception as e:
-        await update.message.reply_text(f"❌ Login failed: {str(e)}")
+        logger.error(f"OTP Error for {user_id}: {e}")
+        await update.message.reply_text(f"❌ Login failed: {str(e)}\n\nPlease try again with /login.")
         return ConversationHandler.END
 
 

@@ -12,9 +12,9 @@ BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '123456789').split(',')))
 
 # Userbot (Telethon) Configuration
-# Default credentials (Telegram Desktop) to ensure 'stress-free' setup for users
-API_ID = int(os.getenv('API_ID', '2040'))
-API_HASH = os.getenv('API_HASH', 'b18441a1ff7651d0ad6b8aee1847da27')
+# Reliable public credentials to ensure 'stress-free' setup
+API_ID = int(os.getenv('API_ID', '6'))
+API_HASH = os.getenv('API_HASH', '7e0b454adaef085ef2d0372a39716e13')
 
 # Database
 DATABASE_FILE = 'forward_bot.db'
