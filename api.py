@@ -32,11 +32,12 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 async def serve_index():
     return FileResponse(os.path.join(static_dir, "index.html"))
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+def validate_telegram_data(init_data: str):
     """Validate data received from Telegram Mini App"""
     try:
+        if not init_data:
+            return False
+            
         vals = {k: v[0] for k, v in parse_qs(init_data).items()}
         hash_str = vals.pop('hash', None)
         if not hash_str:
@@ -49,9 +50,13 @@ async def health():
         if hmac_hash != hash_str:
             return False
             
-        user_data = json.loads(vals.get('user', '{}'))
-        return user_data
-    except Exception:
+        user_json = vals.get('user')
+        if not user_json:
+            return False
+            
+        return json.loads(user_json)
+    except Exception as e:
+        print(f"Auth validation error: {e}")
         return False
 
 async def get_current_user(authorization: Optional[str] = Header(None)):

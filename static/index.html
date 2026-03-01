@@ -52,13 +52,19 @@
             const fetchData = async () => {
                 try {
                     const auth = tg.initData;
-                    // Fetch real tasks from our FastAPI backend
                     const res = await fetch('/api/tasks', {
                         headers: { 'Authorization': auth }
                     });
                     const data = await res.json();
-                    setTasks(Array.isArray(data) ? data : []);
-                    setStats({ total: data.reduce((acc, t) => acc + (t.messages_count || 0), 0), active: data.length });
+                    
+                    if (Array.isArray(data)) {
+                        setTasks(data);
+                        const total = data.reduce((acc, t) => acc + (t.messages_count || 0), 0);
+                        setStats({ total, active: data.length });
+                    } else {
+                        console.error("API returned non-array data:", data);
+                        setTasks([]);
+                    }
                 } catch (e) {
                     console.error("Failed to fetch tasks", e);
                 } finally {
