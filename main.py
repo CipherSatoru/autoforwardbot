@@ -367,18 +367,21 @@ async def handle_dest_selection(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def mytasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all user's forward tasks"""
+    query = update.callback_query
     user_id = update.effective_user.id
     tasks = await db.get_user_tasks(user_id)
     
     if not tasks:
-        await update.message.reply_text(
-            "📭 You don't have any forward tasks yet.\n\n"
-            "Use /newtask to create one."
-        )
+        text = "📭 You don't have any forward tasks yet.\n\nUse /newtask to create one."
+        keyboard = [[InlineKeyboardButton("➕ New Task", callback_data="newtask")]]
+        if query:
+            await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
     
     text = "📋 <b>Your Forward Tasks:</b>\n\n"
-    
+    keyboard = []
     for task in tasks:
         status = "🟢 ON" if task['is_enabled'] else "🔴 OFF"
         text += (
@@ -386,47 +389,55 @@ async def mytasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📤 {task['source_chat_title']} → 📥 {task['destination_chat_title']}\n"
             f"➖➖➖➖➖➖➖➖➖➖\n"
         )
+        keyboard.append([InlineKeyboardButton(f"⚙️ Edit Task {task['task_id']}", callback_data=f"edittask_{task['task_id']}")])
     
-    keyboard = [
-        [InlineKeyboardButton("➕ New Task", callback_data="newtask")],
-        [InlineKeyboardButton("🔄 Refresh", callback_data="mytasks")]
-    ]
+    keyboard.append([InlineKeyboardButton("➕ New Task", callback_data="newtask")])
+    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start_menu")])
     
-    await update.message.reply_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    if query:
+        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def edittask_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show the edit task menu"""
-    # This command is intended to be called by /edittask [task_id]
-    # The callback version will be handled by button_callback
-    if not context.args:
-        await update.message.reply_text(
-            "⚙️ <b>Edit Task</b>\n\n"
-            "Usage: <code>/edittask [task_id]</code>\n\n"
-            "Use /mytasks to see your task IDs."
-        )
-        return
-    
-    try:
-        task_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("❌ Invalid task ID.")
+    """Show the edit task menu (Supports command and callback)"""
+    query = update.callback_query
+    task_id = None
+
+    if query:
+        # data format: edittask_[id]
+        try:
+            task_id = int(query.data.split("_")[1])
+        except (IndexError, ValueError):
+            pass
+    elif context.args:
+        try:
+            task_id = int(context.args[0])
+        except ValueError:
+            pass
+
+    if not task_id:
+        task_id = context.user_data.get('editing_task_id')
+
+    if not task_id:
+        text = "⚙️ <b>Edit Task</b>\n\nUsage: <code>/edittask [task_id]</code>\n\nUse /mytasks to see your task IDs."
+        if query: await query.message.edit_text(text, parse_mode=ParseMode.HTML)
+        else: await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
     
     task = await db.get_task(task_id)
     if not task:
-        await update.message.reply_text("❌ Task not found.")
+        if query: await query.message.edit_text("❌ Task not found.")
+        else: await update.message.reply_text("❌ Task not found.")
         return
     
     user_id = update.effective_user.id
     if task['user_id'] != user_id and user_id not in config.ADMIN_IDS:
-        await update.message.reply_text("❌ You don't own this task.")
+        if query: await query.message.edit_text("❌ You don't own this task.")
+        else: await update.message.reply_text("❌ You don't own this task.")
         return
     
-    context.user_data['editing_task_id'] = task_id # Store task_id for context in subsequent callbacks
+    context.user_data['editing_task_id'] = task_id
 
     # Determine status indicators
     status_emoji = "🟢" if task['is_enabled'] else "🔴"
@@ -460,19 +471,15 @@ async def edittask_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"⚙️ <b>Task Configuration: {task_id}</b>\n\n"
         f"<b>Source:</b> <code>{task['source_chat_title']}</code>\n"
-        f"<b>Dest:</b> <code>{task['destination_chat_title']}</code>\n"
+        f"<b>Dest:</b> <code>{task['destination_chat_title'] Julie}</code>\n"
         f"<b>Status:</b> {status_emoji} {status_text}\n\n"
         f"<i>Select a setting to modify:</i>"
     )
 
-    if update.callback_query:
-        await update.callback_query.message.edit_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+    if query:
+        await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await update.message.reply_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def deletetask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a forward task"""

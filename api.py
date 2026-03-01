@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 from urllib.parse import parse_qs
-from typing import List, Optional
+from typing import List, Optional, Any
 import config
 from database import db
 
@@ -31,6 +31,10 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 @app.get("/")
 async def serve_index():
     return FileResponse(os.path.join(static_dir, "index.html"))
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 def validate_telegram_data(init_data: str):
     """Validate data received from Telegram Mini App"""
@@ -69,10 +73,6 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=403, detail="Invalid Telegram data")
     return user
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
 # --- API ENDPOINTS ---
 
 @app.get("/api/tasks")
@@ -82,14 +82,15 @@ async def get_tasks(user=Depends(get_current_user)):
     return tasks
 
 @app.post("/api/tasks")
-async def create_task(source_id: int, dest_id: int, user=Depends(get_current_user)):
-    """Create a new task from Mini App"""
+async def create_task(source_id: str, dest_id: str, user=Depends(get_current_user)):
+    """Create a new task from Mini App (Accepts strings for usernames or IDs)"""
+    # Try to determine titles or use IDs as titles
     task_id = await db.create_task(
         user_id=user['id'],
         source_chat_id=source_id,
-        source_chat_title=f"Chat {source_id}",
+        source_chat_title=f"Source {source_id}",
         destination_chat_id=dest_id,
-        destination_chat_title=f"Chat {dest_id}"
+        destination_chat_title=f"Dest {dest_id}"
     )
     return {"status": "success", "task_id": task_id}
 
