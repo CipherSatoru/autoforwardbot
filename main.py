@@ -1,3 +1,4 @@
+"""here is the proof"""
 """
 Telegram Forward Bot - PLATINUM Edition
 Main Bot File with All Commands
