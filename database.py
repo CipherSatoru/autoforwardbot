@@ -192,6 +192,34 @@ class Database:
                 await db.execute(f'UPDATE forward_tasks SET {key} = ? WHERE task_id = ?', (value, task_id))
             await db.commit()
     
+    async def get_recent_sources(self, user_id: int, limit: int = 5) -> List[Dict]:
+        """Get list of distinct recent source chats used by the user"""
+        async with aiosqlite.connect(self.db_file) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute('''
+                SELECT DISTINCT source_chat_id, source_chat_title 
+                FROM forward_tasks 
+                WHERE user_id = ? 
+                ORDER BY created_date DESC 
+                LIMIT ?
+            ''', (user_id, limit)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_recent_destinations(self, user_id: int, limit: int = 5) -> List[Dict]:
+        """Get list of distinct recent destination chats used by the user"""
+        async with aiosqlite.connect(self.db_file) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute('''
+                SELECT DISTINCT destination_chat_id, destination_chat_title 
+                FROM forward_tasks 
+                WHERE user_id = ? 
+                ORDER BY created_date DESC 
+                LIMIT ?
+            ''', (user_id, limit)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
     async def delete_task(self, task_id: int):
         async with aiosqlite.connect(self.db_file) as db:
             await db.execute('DELETE FROM forward_tasks WHERE task_id = ?', (task_id,))

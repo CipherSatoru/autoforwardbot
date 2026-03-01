@@ -71,10 +71,54 @@ class ForwardEngine:
         """Send the processed message to destination"""
         try:
             processed_text = filter_result['text']
+            has_watermark = bool(task.get('watermark_text') and task.get('watermark_text') != 'none')
             
-            # Handle different message types
+            # If we need to watermark, we must use the manual download/upload method
+            if has_watermark and (message.photo or message.video):
+                 # Fallthrough to existing manual logic for watermarking
+                 pass
+            
+            # For other cases, try to use copy_message which preserves everything perfectly
+            # unless we have completely changed the text/caption beyond simple addition
+            elif not has_watermark:
+                try:
+                    # If we have a processed text (header/footer/translation), we use it as caption/text
+                    # copy_message takes 'caption' for media or 'text' is implied for text messages?
+                    # Actually copy_message has 'caption' parameter which overrides original caption.
+                    # For text messages, we can't use copy_message if we want to change the text.
+                    # But for media, we can use copy_message and replace the caption.
+                    
+                    if message.text:
+                        # For text, if we changed it (cleaner/header/footer), we must use send_message
+                        # Check if text was modified? filter_result['text'] is the modified text.
+                        # Always use send_message for text to ensure our modifications apply.
+                        await bot.send_message(
+                            chat_id=dest_chat_id,
+                            text=processed_text,
+                            parse_mode=ParseMode.HTML if self._has_html(processed_text) else None,
+                            disable_web_page_preview=True
+                        )
+                        return True
+                    
+                    else:
+                        # For media (photo, video, etc), use copy_message with new caption
+                        await bot.copy_message(
+                            chat_id=dest_chat_id,
+                            from_chat_id=message.chat.id,
+                            message_id=message.message_id,
+                            caption=processed_text,
+                            parse_mode=ParseMode.HTML if self._has_html(processed_text) else None
+                        )
+                        return True
+                        
+                except Exception as e:
+                    # Fallback to manual method if copy_message fails (e.g. some restriction?)
+                    # print(f"copy_message failed, falling back: {e}")
+                    pass
+
+            # Manual handling (Watermarking or Fallback)
             if message.text:
-                # Text message
+                # Already handled above, but just in case
                 await bot.send_message(
                     chat_id=dest_chat_id,
                     text=processed_text,

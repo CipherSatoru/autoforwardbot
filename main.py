@@ -6,6 +6,8 @@ Main Bot File with All Commands
 import asyncio
 import logging
 import re # Import re module for regex operations
+import uvicorn
+from api import app as fastapi_app
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
@@ -33,7 +35,7 @@ STATE_ADD_REGEX_VALUE = range(7) # Added STATE_ADD_REGEX_VALUE, though not stric
 
 # ========== START & HELP ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler"""
+    """Modern Start command with Onboarding Wizard"""
     user = update.effective_user
     
     # Add user to database if they are new
@@ -44,91 +46,274 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_name=user.last_name
     )
     
-    await update.message.reply_text(
-        config.WELCOME_MESSAGE,
-        parse_mode=ParseMode.HTML
+    keyboard = [
+        [InlineKeyboardButton("🚀 Quick Start Wizard", callback_data="guide_1")],
+        [InlineKeyboardButton("➕ Create New Task", callback_data="newtask")],
+        [InlineKeyboardButton("📋 My Tasks", callback_data="mytasks"), InlineKeyboardButton("📊 My Stats", callback_data="stats_user")],
+        [InlineKeyboardButton("❓ Help Center", callback_data="help_main")]
+    ]
+    
+    welcome_text = (
+        f"👋 <b>Welcome to PLATINUM Forwarder, {user.first_name}!</b>\n\n"
+        "The most powerful tool to sync content between Telegram channels and groups.\n\n"
+        "✨ <b>First time here?</b> Tap the button below for a 30-second tour!"
     )
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(
+            welcome_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            welcome_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Help command handler"""
-    await update.message.reply_text(
-        config.HELP_MESSAGE,
-        parse_mode=ParseMode.HTML
+    """Categorized Help System"""
+    keyboard = [
+        [InlineKeyboardButton("📤 Forwarding Guide", callback_data="help_forward"), InlineKeyboardButton("🛠️ Filters", callback_data="help_filters")],
+        [InlineKeyboardButton("💧 Watermarks", callback_data="help_watermark"), InlineKeyboardButton("🌐 Translation", callback_data="help_trans")],
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="start_menu")]
+    ]
+    
+    help_text = (
+        "❓ <b>How can we help you today?</b>\n\n"
+        "Select a category below to learn more about specific features."
     )
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(help_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(help_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# ========== ONBOARDING GUIDE STEPS ==========
+async def onboarding_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the multi-step interactive guide"""
+    query = update.callback_query
+    await query.answer()
+    
+    step = int(query.data.split("_")[1])
+    
+    if step == 1:
+        text = (
+            "🚀 <b>Step 1: The Basics</b>\n\n"
+            "To forward messages, you need a <b>Source</b> (where messages come from) and a <b>Destination</b> (where they go).\n\n"
+            "💡 <i>Tip: The bot must be an Admin in the destination to post messages!</i>"
+        )
+        keyboard = [[InlineKeyboardButton("Next: Adding Chats ➡️", callback_data="guide_2")]]
+        
+    elif step == 2:
+        text = (
+            "📂 <b>Step 2: Selecting Chats</b>\n\n"
+            "When you create a task, you can simply <b>forward a message</b> from the chat to the bot.\n\n"
+            "The bot will automatically detect the Chat ID and Title. No typing required!"
+        )
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="guide_1")],
+            [InlineKeyboardButton("Next: Pro Features ➡️", callback_data="guide_3")]
+        ]
+        
+    elif step == 3:
+        text = (
+            "✨ <b>Step 3: Pro Customization</b>\n\n"
+            "Once a task is created, use <b>Edit Task</b> to:\n"
+            "• Add Watermarks 💧\n"
+            "• Auto-Translate 🌐\n"
+            "• Filter keywords or users 🛠️\n\n"
+            "Ready to try?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Back", callback_data="guide_2")],
+            [InlineKeyboardButton("🚀 Create My First Task", callback_data="newtask")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="start_menu")]
+        ]
+        
+    await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 # ========== FORWARD TASK MANAGEMENT ==========
 async def newtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Create a new forward task"""
-    await update.message.reply_text(
+    """Create a new forward task with interactive selection"""
+    user_id = update.effective_user.id
+    
+    # Get recent sources for quick selection
+    recent_sources = await db.get_recent_sources(user_id)
+    
+    text = (
         "🔄 <b>Create New Forward Task</b>\n\n"
-        "Step 1: Forward a message from the <b>SOURCE</b> chat\n"
-        "(the chat you want to forward FROM)\n\n"
-        "Or send the chat ID/username directly.",
-        parse_mode=ParseMode.HTML
+        "<b>Step 1: Select Source Chat</b>\n"
+        "Choose from recent chats or forward a message from a new source."
     )
-    # Use conversation handler states for a more structured flow
+    
+    keyboard = []
+    # Add recent sources as buttons
+    for src in recent_sources:
+        title = src['source_chat_title'] or str(src['source_chat_id'])
+        # Truncate title if too long
+        if len(title) > 20: title = title[:17] + "..."
+        keyboard.append([InlineKeyboardButton(f"📂 {title}", callback_data=f"select_source_{src['source_chat_id']}")])
+    
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    context.user_data['awaiting_source'] = True
+    context.user_data['awaiting_dest'] = False
     return STATE_AWAITING_SOURCE
 
 async def handle_source_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle source chat selection during new task creation"""
-    message = update.message
-    
+    """Handle source chat selection (Message or Callback)"""
     source_chat_id = None
     source_chat_title = "Unknown"
     
-    if message.forward_from_chat:
-        source_chat_id = message.forward_from_chat.id
-        source_chat_title = message.forward_from_chat.title or "Unknown"
-    elif message.text:
-        try:
-            source_chat_id = int(message.text)
-            source_chat_title = f"Chat {source_chat_id}"
-        except ValueError:
-            source_chat_id = message.text # Assume it's a username
-            source_chat_title = message.text
-    else:
-        await update.message.reply_text("❌ Invalid source. Please forward a message or send a chat ID/username.")
-        return STATE_AWAITING_SOURCE # Stay in this state
+    # Handle Callback Query (Button Selection)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        
+        if data.startswith("select_source_"):
+            try:
+                source_chat_id = int(data.split("_")[2])
+                # Ideally fetch title from DB or known cache, defaulting to ID for now
+                # We could do a quick DB lookup if needed, but let's trust the ID.
+                # Or re-fetch recent to get title? Let's use ID as title fallback.
+                source_chat_title = f"Chat {source_chat_id}"
+                # Try to find title in recent list if possible
+                recent = await db.get_recent_sources(update.effective_user.id, limit=20)
+                for r in recent:
+                    if int(r['source_chat_id']) == source_chat_id:
+                        source_chat_title = r['source_chat_title']
+                        break
+            except ValueError:
+                await query.message.edit_text("❌ Invalid selection.")
+                return STATE_AWAITING_SOURCE
+    
+    # Handle Message Forwarding
+    elif update.message:
+        message = update.message
+        if message.forward_from_chat:
+            source_chat_id = message.forward_from_chat.id
+            source_chat_title = message.forward_from_chat.title or "Unknown"
+        elif message.text:
+            try:
+                source_chat_id = int(message.text)
+                source_chat_title = f"Chat {source_chat_id}"
+            except ValueError:
+                # Support username (e.g. @channel)
+                source_chat_id = message.text
+                source_chat_title = message.text
+        else:
+             await update.message.reply_text("❌ Invalid source. Please forward a message or select from the list.")
+             return STATE_AWAITING_SOURCE
+
+    if not source_chat_id:
+        return STATE_AWAITING_SOURCE
 
     context.user_data['source_chat_id'] = source_chat_id
     context.user_data['source_chat_title'] = source_chat_title
     context.user_data['awaiting_source'] = False
     context.user_data['awaiting_dest'] = True
     
-    await update.message.reply_text(
-        f"✅ Source set: <b>{source_chat_title}</b>\n\n"
-        "Step 2: Now forward a message from the <b>DESTINATION</b> chat\n"
-        "(the chat you want to forward TO)",
-        parse_mode=ParseMode.HTML
+    # Prepare Step 2: Destination Selection
+    user_id = update.effective_user.id
+    recent_dests = await db.get_recent_destinations(user_id)
+    
+    text = (
+        f"✅ Source: <b>{source_chat_title}</b>\n\n"
+        "<b>Step 2: Select Destination Chat</b>\n"
+        "Choose from recent chats or forward a message from a new destination."
     )
+    
+    keyboard = []
+    for dst in recent_dests:
+        # Don't show the selected source as a destination option (prevent loop)
+        if str(dst['destination_chat_id']) == str(source_chat_id):
+            continue
+            
+        title = dst['destination_chat_title'] or str(dst['destination_chat_id'])
+        if len(title) > 20: title = title[:17] + "..."
+        keyboard.append([InlineKeyboardButton(f"📥 {title}", callback_data=f"select_dest_{dst['destination_chat_id']}")])
+    
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+
+    if update.callback_query:
+         await update.callback_query.message.edit_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        
     return STATE_AWAITING_DEST
 
 async def handle_dest_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle destination chat selection during new task creation"""
-    message = update.message
-    
+    """Handle destination chat selection (Message or Callback)"""
     dest_chat_id = None
     dest_chat_title = "Unknown"
     
-    if message.forward_from_chat:
-        dest_chat_id = message.forward_from_chat.id
-        dest_chat_title = message.forward_from_chat.title or "Unknown"
-    elif message.text:
-        try:
-            dest_chat_id = int(message.text)
-            dest_chat_title = f"Chat {dest_chat_id}"
-        except ValueError:
-            dest_chat_id = message.text # Assume it's a username
-            dest_chat_title = message.text
-    else:
-        await update.message.reply_text("❌ Invalid destination. Please forward a message or send a chat ID/username.")
-        return STATE_AWAITING_DEST # Stay in this state
+    # Handle Callback Query
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        
+        if data.startswith("select_dest_"):
+            try:
+                dest_chat_id = int(data.split("_")[2])
+                dest_chat_title = f"Chat {dest_chat_id}"
+                # Try to fetch real title
+                recent = await db.get_recent_destinations(update.effective_user.id, limit=20)
+                for r in recent:
+                    if int(r['destination_chat_id']) == dest_chat_id:
+                        dest_chat_title = r['destination_chat_title']
+                        break
+            except ValueError:
+                await query.message.edit_text("❌ Invalid selection.")
+                return STATE_AWAITING_DEST
+
+    # Handle Message Forwarding
+    elif update.message:
+        message = update.message
+        if message.forward_from_chat:
+            dest_chat_id = message.forward_from_chat.id
+            dest_chat_title = message.forward_from_chat.title or "Unknown"
+        elif message.text:
+            try:
+                dest_chat_id = int(message.text)
+                dest_chat_title = f"Chat {dest_chat_id}"
+            except ValueError:
+                dest_chat_id = message.text
+                dest_chat_title = message.text
+        else:
+            await update.message.reply_text("❌ Invalid destination. Please forward a message or select from the list.")
+            return STATE_AWAITING_DEST
+
+    if not dest_chat_id:
+        return STATE_AWAITING_DEST
 
     # Create the task
     user_id = update.effective_user.id
     source_chat_id = context.user_data['source_chat_id']
     source_chat_title = context.user_data['source_chat_title']
     
+    # Check for self-forwarding loop
+    if str(source_chat_id) == str(dest_chat_id):
+        error_text = "❌ Source and Destination cannot be the same."
+        if update.callback_query:
+            await update.callback_query.message.reply_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
+        return STATE_AWAITING_DEST
+
     task_id = await db.create_task(
         user_id=user_id,
         source_chat_id=source_chat_id,
@@ -145,9 +330,27 @@ async def handle_dest_selection(update: Update, context: ContextTypes.DEFAULT_TY
     
     keyboard = [
         [InlineKeyboardButton("✅ Enable Task", callback_data=f"enable_{task_id}")],
-        [InlineKeyboardButton("⚙️ Manage Filters", callback_data=f"manage_filters_{task_id}")], # Changed to Manage Filters
+        [InlineKeyboardButton("⚙️ Configure Task", callback_data=f"edittask_{task_id}")],
         [InlineKeyboardButton("📋 My Tasks", callback_data="mytasks")]
     ]
+    
+    success_text = (
+        f"✅ <b>Task Created!</b>\n\n"
+        f"📤 <b>From:</b> {source_chat_title}\n"
+        f"📥 <b>To:</b> {dest_chat_title}\n\n"
+        f"Task ID: <code>{task_id}</code>"
+    )
+
+    if update.callback_query:
+        await update.callback_query.message.edit_text(
+            success_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            success_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    return ConversationHandler.END
     
     await update.message.reply_text(
         f"✅ <b>Forward Task Created!</b>\n\n"
@@ -224,25 +427,51 @@ async def edittask_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     context.user_data['editing_task_id'] = task_id # Store task_id for context in subsequent callbacks
 
+    # Determine status indicators
+    status_emoji = "🟢" if task['is_enabled'] else "🔴"
+    status_text = "Enabled" if task['is_enabled'] else "Disabled"
+    
+    # Format labels with current values
+    delay_val = f"{task['forward_delay']}s" if task['forward_delay'] > 0 else "Off"
+    translate_val = task['translate_to'].upper() if task['translate_to'] and task['translate_to'] != 'none' else "Off"
+    watermark_val = "On" if task['watermark_text'] and task['watermark_text'] != 'none' else "Off"
+
     keyboard = [
-        [InlineKeyboardButton("⏱️ Set Delay", callback_data=f"edit_delay_{task_id}")],
-        [InlineKeyboardButton("📋 Header/Footer", callback_data=f"edit_headerfooter_{task_id}")],
-        [InlineKeyboardButton("🌐 Translation", callback_data=f"edit_translate_{task_id}")],
-        [InlineKeyboardButton("💧 Watermark", callback_data=f"edit_watermark_{task_id}")],
-        [InlineKeyboardButton("⏰ Schedule", callback_data=f"edit_schedule_{task_id}")],
-        [InlineKeyboardButton("🛠️ Manage Filters", callback_data=f"manage_filters_{task_id}")], # Manage Filters callback
+        [
+            InlineKeyboardButton(f"⏱️ Delay: {delay_val}", callback_data=f"edit_delay_{task_id}"),
+            InlineKeyboardButton(f"🌐 Trans: {translate_val}", callback_data=f"edit_translate_{task_id}")
+        ],
+        [
+            InlineKeyboardButton(f"📋 Header/Footer", callback_data=f"edit_headerfooter_{task_id}"),
+            InlineKeyboardButton(f"💧 Watermark: {watermark_val}", callback_data=f"edit_watermark_{task_id}")
+        ],
+        [
+            InlineKeyboardButton(f"⏰ Schedule", callback_data=f"edit_schedule_{task_id}"),
+            InlineKeyboardButton(f"🛠️ Manage Filters", callback_data=f"manage_filters_{task_id}")
+        ],
+        [
+            InlineKeyboardButton(f"{status_emoji} {status_text}", callback_data=f"enable_{task_id}" if not task['is_enabled'] else f"disable_{task_id}"),
+            InlineKeyboardButton("🗑️ Delete Task", callback_data=f"deletetask_confirm_{task_id}")
+        ],
         [InlineKeyboardButton("🔙 Back to My Tasks", callback_data="mytasks")]
     ]
     
-    await update.message.reply_text(
-        f"⚙️ <b>Edit Task {task_id}</b>\n\n"
-        f"📤 From: {task['source_chat_title']}\n"
-        f"📥 To: {task['destination_chat_title']}\n"
-        f"Status: {'🟢 Enabled' if task['is_enabled'] else '🔴 Disabled'}\n\n"
-        f"Select an option to edit:",
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    text = (
+        f"⚙️ <b>Task Configuration: {task_id}</b>\n\n"
+        f"<b>Source:</b> <code>{task['source_chat_title']}</code>\n"
+        f"<b>Dest:</b> <code>{task['destination_chat_title']}</code>\n"
+        f"<b>Status:</b> {status_emoji} {status_text}\n\n"
+        f"<i>Select a setting to modify:</i>"
     )
+
+    if update.callback_query:
+        await update.callback_query.message.edit_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await update.message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 async def deletetask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a forward task"""
@@ -1036,29 +1265,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     
-    # Handle New Task flow callbacks
-    if data == "newtask":
-        await query.message.reply_text(
-            "🔄 <b>Create New Forward Task</b>\n\n"
-            "Forward a message from the <b>SOURCE</b> chat.",
-            parse_mode=ParseMode.HTML
-        )
-        context.user_data['awaiting_source'] = True # Set state for ConversationHandler
-        return STATE_AWAITING_SOURCE # Transition to state
-
     # Handle My Tasks callback
-    elif data == "mytasks":
+    if data == "mytasks":
         user_id = update.effective_user.id
         tasks = await db.get_user_tasks(user_id)
         
         if not tasks:
+            keyboard = [[InlineKeyboardButton("➕ New Task", callback_data="newtask")]]
             await query.message.edit_text(
                 "📭 You don't have any forward tasks yet.\n\n"
-                "Use /newtask to create one."
+                "Use /newtask to create one.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
 
         text = "📋 <b>Your Forward Tasks:</b>\n\n"
+        keyboard = []
         for task in tasks:
             status = "🟢 ON" if task['is_enabled'] else "🔴 OFF"
             text += (
@@ -1066,11 +1288,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📤 {task['source_chat_title']} → 📥 {task['destination_chat_title']}\n"
                 f"➖➖➖➖➖➖➖➖➖➖\n"
             )
+            # Add edit button row
+            keyboard.append([InlineKeyboardButton(f"⚙️ Edit {task['task_id']}", callback_data=f"edittask_{task['task_id']}")])
         
-        keyboard = [
-            [InlineKeyboardButton("➕ New Task", callback_data="newtask")],
-            [InlineKeyboardButton("🔄 Refresh", callback_data="mytasks")]
-        ]
+        keyboard.append([InlineKeyboardButton("➕ New Task", callback_data="newtask")])
+        keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="mytasks")])
         
         await query.message.edit_text(
             text,
@@ -1093,9 +1315,69 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             await db.enable_task(task_id)
-            await query.message.reply_text(f"✅ Task <code>{task_id}</code> enabled!", parse_mode=ParseMode.HTML)
+            # Check if we are in the edit menu context (to refresh it)
+            if "edittask" in str(query.message.reply_markup): # Crude check or just call edittask_menu
+                await edittask_menu(update, context)
+            else:
+                 await query.message.reply_text(f"✅ Task <code>{task_id}</code> enabled!", parse_mode=ParseMode.HTML)
         except (IndexError, ValueError):
             await query.message.reply_text("❌ Invalid callback data.")
+
+    # Handle Disable Task callback
+    elif data.startswith("disable_"):
+        try:
+            task_id = int(data.split("_")[1])
+            task = await db.get_task(task_id)
+            if not task:
+                await query.message.reply_text("❌ Task not found.")
+                return
+            user_id = query.from_user.id
+            if task['user_id'] != user_id and user_id not in config.ADMIN_IDS:
+                await query.message.reply_text("❌ You don't own this task.")
+                return
+            
+            await db.disable_task(task_id)
+            if "edittask" in str(query.message.reply_markup):
+                await edittask_menu(update, context)
+            else:
+                await query.message.reply_text(f"🔴 Task <code>{task_id}</code> disabled!", parse_mode=ParseMode.HTML)
+        except (IndexError, ValueError):
+            await query.message.reply_text("❌ Invalid callback data.")
+
+    # Handle Delete Task Confirmation
+    elif data.startswith("deletetask_confirm_"):
+        try:
+            task_id = int(data.split("_")[2])
+            keyboard = [
+                [InlineKeyboardButton("🗑️ Yes, Delete", callback_data=f"deletetask_final_{task_id}")],
+                [InlineKeyboardButton("❌ Cancel", callback_data=f"edittask_{task_id}")]
+            ]
+            await query.message.edit_text(
+                f"⚠️ <b>Delete Task {task_id}?</b>\n\nAre you sure?",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except (IndexError, ValueError):
+             await query.message.reply_text("❌ Error parsing task ID.")
+
+    # Handle Final Delete
+    elif data.startswith("deletetask_final_"):
+        try:
+            task_id = int(data.split("_")[2])
+            await db.delete_task(task_id)
+            await query.message.edit_text(
+                f"✅ Task <code>{task_id}</code> deleted successfully.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📋 My Tasks", callback_data="mytasks")]])
+            )
+        except (IndexError, ValueError):
+             await query.message.reply_text("❌ Error deleting task.")
+
+    # Handle Cancel
+    elif data == "cancel":
+        await query.message.edit_text("❌ Operation cancelled.")
+        context.user_data.clear()
+        return ConversationHandler.END
 
     # Handle Manage Filters callback
     elif data.startswith("manage_filters_"):
@@ -1211,16 +1493,16 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
     if not message:
         return
 
+    chat_id = message.chat.id
+    # logger.info(f"Received message from chat {chat_id} ({message.chat.title or 'Private'})")
+
     # Check for new task flow (structured via ConversationHandler states)
-    # The ConversationHandler should normally catch these if the flow is active,
-    # but some legacy code uses user_data flags.
     if context.user_data.get('awaiting_source'):
         return await handle_source_selection(update, context)
     elif context.user_data.get('awaiting_dest'):
         return await handle_dest_selection(update, context)
 
-    # Check if this message is a setting input (e.g., delay, header, footer)
-    # This is often handled by specific commands, but checking here for completeness
+    # Check if this message is a setting input
     editing_task_id = context.user_data.get('editing_setting_for_task')
     if editing_task_id:
         # Example: handle delay setting via direct text input if prompted
@@ -1239,25 +1521,28 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
 
     # MAIN FORWARDING LOGIC
     # We use chat_id (source) to find any active tasks
-    chat_id = message.chat.id
-    
-    # Get all active tasks for this source chat
-    tasks = await db.get_tasks_by_source(chat_id)
-    if not tasks:
-        return
+    try:
+        tasks = await db.get_tasks_by_source(chat_id)
+        if not tasks:
+            # logger.info(f"No active tasks found for source {chat_id}")
+            return
 
-    for task in tasks:
-        # The db query already filters for is_enabled = 1, but double check
-        if not task.get('is_enabled', 1):
-            continue
-        
-        # Get filters for this task
-        filters_list = await db.get_task_filters(task['task_id'])
-        
-        # Forward via engine
-        # forward_engine.forward_message(bot, message, task, filters_list)
-        # Note: forward_engine should be imported from forwarder
-        await forward_engine.forward_message(context.bot, message, task, filters_list)
+        # logger.info(f"Found {len(tasks)} tasks for source {chat_id}")
+
+        for task in tasks:
+            # The db query already filters for is_enabled = 1, but double check
+            if not task.get('is_enabled', 1):
+                continue
+            
+            # Get filters for this task
+            filters_list = await db.get_task_filters(task['task_id'])
+            
+            # Forward via engine
+            # logger.info(f"Processing task {task['task_id']} -> Dest {task['destination_chat_id']}")
+            await forward_engine.forward_message(context.bot, message, task, filters_list)
+            
+    except Exception as e:
+        logger.error(f"Error in handle_incoming_message: {e}", exc_info=True)
 
 
 # ========== MAIN FUNCTION ==========
@@ -1309,8 +1594,18 @@ async def main():
     application.add_handler(CommandHandler("users", users))
     
     # Callback Query Handlers
+    # New task interactive selection handlers
+    application.add_handler(CallbackQueryHandler(handle_source_selection, pattern='^select_source_(\d+)$'))
+    application.add_handler(CallbackQueryHandler(handle_dest_selection, pattern='^select_dest_(\d+)$'))
+    application.add_handler(CallbackQueryHandler(newtask, pattern='^newtask$')) # Handle the newtask button from main menu
+    
+    # Onboarding guide handlers
+    application.add_handler(CallbackQueryHandler(onboarding_guide, pattern='^guide_\d+$'))
+    application.add_handler(CallbackQueryHandler(start, pattern='^start_menu$'))
+    application.add_handler(CallbackQueryHandler(help_command, pattern='^help_main$'))
+
     # For callbacks that initiate conversation states
-    application.add_handler(CallbackQueryHandler(button_callback, pattern='^(newtask|mytasks|enable_.*|filters_.*|edittask_.*|setdelay_.*|headerfooter_.*|translate_.*|watermark_.*|schedule_.*|manage_filters_.*)$'))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern='^(mytasks|enable_.*|filters_.*|edittask_.*|setdelay_.*|headerfooter_.*|translate_.*|watermark_.*|schedule_.*|manage_filters_.*|deletetask_.*|cancel|stats_user)$'))
     # For callbacks handled within ConversationHandler states or specific actions
     application.add_handler(CallbackQueryHandler(filters_command_callback_handler, pattern='^viewfilters_(\d+)$')) # Callback to view filters
     application.add_handler(CallbackQueryHandler(removefilter_callback, pattern='^removefilter_(\d+)$')) # Callback for removing filters
@@ -1329,6 +1624,11 @@ async def main():
     # Start the bot
     print("🤖 PLATINUM Forward Bot is starting...")
     print("✅ Bot is running!")
+    
+    # Run FastAPI server in the background
+    config_server = uvicorn.Config(fastapi_app, host="0.0.0.0", port=10000, log_level="info")
+    server = uvicorn.Server(config_server)
+    asyncio.create_task(server.serve())
     
     await application.initialize()
     await application.start()
