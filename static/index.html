@@ -3,173 +3,232 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Platinum Forwarder</title>
+    <title>Platinum Pro Dashboard</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; transition: background-color 0.3s; }
         .tg-bg { background-color: var(--tg-theme-bg-color, #f1f1f1); }
         .tg-text { color: var(--tg-theme-text-color, #000); }
         .tg-secondary-bg { background-color: var(--tg-theme-secondary-bg-color, #ffffff); }
-        .card { background-color: var(--tg-theme-secondary-bg-color, #ffffff); border-radius: 24px; }
+        .card { background-color: var(--tg-theme-secondary-bg-color, #ffffff); border-radius: 28px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+        .btn-primary { background-color: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #ffffff); }
+        .input-field { background-color: rgba(0,0,0,0.05); border-radius: 16px; padding: 12px 16px; width: 100%; border: 2px solid transparent; transition: all 0.2s; }
+        .input-field:focus { border-color: var(--tg-theme-button-color, #2481cc); outline: none; background-color: rgba(0,0,0,0.02); }
+        .tab-active { border-bottom: 3px solid var(--tg-theme-button-color, #2481cc); font-weight: 800; }
     </style>
 </head>
-<body class="tg-bg tg-text min-h-screen pb-20">
+<body class="tg-bg tg-text min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
 
         function App() {
+            const [view, setView] = useState('dashboard'); // dashboard, create, settings
             const [tasks, setTasks] = useState([]);
-            const [stats, setStats] = useState({ total: 0, active: 0 });
+            const [recentSources, setRecentSources] = useState([]);
+            const [recentDests, setRecentDests] = useState([]);
             const [loading, setLoading] = useState(true);
+            const [formData, setFormData] = useState({ source: '', dest: '' });
+            const [activeTask, setActiveTask] = useState(null);
+            
             const tg = window.Telegram.WebApp;
 
             useEffect(() => {
                 tg.ready();
                 tg.expand();
                 fetchData();
-                
-                tg.MainButton.setParams({
-                    text: '➕ CREATE NEW TASK',
-                    is_visible: true,
-                    color: tg.themeParams.button_color || '#2481cc'
-                });
-
-                const handleMainButton = () => {
-                    tg.close(); // Return to bot for creation flow
-                };
-
-                tg.MainButton.onClick(handleMainButton);
-                return () => tg.MainButton.offClick(handleMainButton);
+                tg.BackButton.onClick(() => setView('dashboard'));
             }, []);
 
+            useEffect(() => {
+                if (view === 'dashboard') {
+                    tg.BackButton.hide();
+                    tg.MainButton.setParams({ text: '➕ NEW SYNC TASK', is_visible: true });
+                    tg.MainButton.onClick(() => setView('create'));
+                } else {
+                    tg.BackButton.show();
+                    tg.MainButton.hide();
+                }
+            }, [view]);
+
             const fetchData = async () => {
+                setLoading(true);
                 try {
                     const auth = tg.initData;
-                    const res = await fetch('/api/tasks', {
-                        headers: { 'Authorization': auth }
-                    });
-                    const data = await res.json();
+                    const [tasksRes, srcRes, dstRes] = await Promise.all([
+                        fetch('/api/tasks', { headers: { 'Authorization': auth } }),
+                        fetch('/api/chats/sources', { headers: { 'Authorization': auth } }),
+                        fetch('/api/chats/destinations', { headers: { 'Authorization': auth } })
+                    ]);
                     
-                    if (Array.isArray(data)) {
-                        setTasks(data);
-                        const total = data.reduce((acc, t) => acc + (t.messages_count || 0), 0);
-                        setStats({ total, active: data.length });
-                    } else {
-                        console.error("API returned non-array data:", data);
-                        setTasks([]);
-                    }
+                    const tasksData = await tasksRes.json();
+                    setTasks(Array.isArray(tasksData) ? tasksData : []);
+                    setRecentSources(await srcRes.json());
+                    setRecentDests(await dstRes.json());
                 } catch (e) {
-                    console.error("Failed to fetch tasks", e);
+                    console.error("Data fetch error", e);
                 } finally {
                     setLoading(false);
                 }
             };
 
-            const toggleTask = async (id, currentStatus) => {
+            const handleCreate = async () => {
+                if (!formData.source || !formData.dest) return tg.showAlert("Please fill both IDs!");
+                tg.showConfirm(`Sync from ${formData.source} to ${formData.dest}?`, async (ok) => {
+                    if (!ok) return;
+                    setLoading(true);
+                    const auth = tg.initData;
+                    await fetch(`/api/tasks?source_id=${formData.source}&dest_id=${formData.dest}`, {
+                        method: 'POST',
+                        headers: { 'Authorization': auth }
+                    });
+                    setView('dashboard');
+                    fetchData();
+                });
+            };
+
+            const toggleTask = async (id, status) => {
                 const auth = tg.initData;
-                const newStatus = currentStatus ? 0 : 1;
                 await fetch(`/api/tasks/${id}`, {
                     method: 'PATCH',
                     headers: { 'Authorization': auth, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_enabled: newStatus })
+                    body: JSON.stringify({ is_enabled: status ? 0 : 1 })
                 });
                 fetchData();
             };
 
+            const deleteTask = async (id) => {
+                tg.showConfirm("Permanently delete this task?", async (ok) => {
+                    if (!ok) return;
+                    await fetch(`/api/tasks/${id}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': auth }
+                    });
+                    fetchData();
+                });
+            }
+
+            if (view === 'create') {
+                return (
+                    <div className="p-6">
+                        <h2 className="text-2xl font-black mb-2">Create Sync</h2>
+                        <p className="opacity-50 text-sm mb-8 font-bold uppercase tracking-widest">Setup a new content bridge</p>
+                        
+                        <div className="space-y-6">
+                            <div>
+                                <label className="text-[10px] font-black opacity-40 uppercase mb-2 block">Source Chat ID / Username</label>
+                                <input 
+                                    className="input-field" 
+                                    placeholder="@my_channel or -100..." 
+                                    value={formData.source}
+                                    onChange={e => setFormData({...formData, source: e.target.value})}
+                                />
+                                <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+                                    {recentSources.map(s => (
+                                        <button key={s.source_chat_id} onClick={() => setFormData({...formData, source: s.source_chat_id})} className="whitespace-nowrap px-3 py-1 rounded-full bg-blue-500/10 text-blue-500 text-[10px] font-bold border border-blue-500/20">
+                                            {s.source_chat_title}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="flex justify-center py-2 opacity-20">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black opacity-40 uppercase mb-2 block">Destination Chat ID</label>
+                                <input 
+                                    className="input-field" 
+                                    placeholder="-100..." 
+                                    value={formData.dest}
+                                    onChange={e => setFormData({...formData, dest: e.target.value})}
+                                />
+                                <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+                                    {recentDests.map(d => (
+                                        <button key={d.destination_chat_id} onClick={() => setFormData({...formData, dest: d.destination_chat_id})} className="whitespace-nowrap px-3 py-1 rounded-full bg-green-500/10 text-green-500 text-[10px] font-bold border border-green-500/20">
+                                            {d.destination_chat_title}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <button onClick={handleCreate} className="w-full btn-primary font-black py-4 rounded-2xl shadow-xl mt-8 active:scale-95 transition-all">
+                                START PLATINUM SYNC
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
-                <div className="p-5 max-w-lg mx-auto">
-                    {/* Header */}
+                <div className="p-6 max-w-lg mx-auto">
                     <div className="flex items-center justify-between mb-8">
                         <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-black text-xl shadow-lg">
+                            <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-black text-xl">
                                 {tg.initDataUnsafe?.user?.first_name?.[0] || 'P'}
                             </div>
                             <div>
-                                <h1 className="font-black text-xl leading-tight">Platinum Dashboard</h1>
-                                <p className="text-xs opacity-50 font-bold uppercase tracking-widest">Premium Sync Pro</p>
+                                <h1 className="font-black text-xl">Platinum Pro</h1>
+                                <p className="text-[10px] opacity-40 font-black uppercase tracking-tighter">Active Instance: {tg.platform}</p>
                             </div>
                         </div>
-                        <div className="bg-blue-500/10 p-2 rounded-xl">
-                            <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                        </div>
+                        <button onClick={fetchData} className="p-2 bg-black/5 rounded-full">
+                            <svg className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path></svg>
+                        </button>
                     </div>
 
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-2 gap-4 mb-10">
-                        <div className="card p-5 shadow-sm">
-                            <p className="text-[10px] font-black uppercase opacity-40 mb-1">Messages Sync'd</p>
-                            <h2 className="text-3xl font-black text-blue-500">{stats.total}</h2>
-                        </div>
-                        <div className="card p-5 shadow-sm">
-                            <p className="text-[10px] font-black uppercase opacity-40 mb-1">Active Channels</p>
-                            <h2 className="text-3xl font-black text-green-500">{stats.active}</h2>
-                        </div>
-                    </div>
-
-                    {/* Tasks List */}
-                    <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-black text-sm uppercase tracking-widest opacity-40">Your Active Flows</h3>
-                        <div className="h-[1px] flex-1 bg-current opacity-10 mx-4"></div>
-                    </div>
-
-                    {loading ? (
-                        <div className="text-center py-10 opacity-50 font-bold italic">Loading Platinum Streams...</div>
-                    ) : tasks.length === 0 ? (
-                        <div className="card p-10 text-center opacity-50">
-                            <p className="font-bold">No active tasks found.</p>
-                            <p className="text-xs mt-2">Use the bot to create your first sync!</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-4">
-                            {tasks.map(task => (
-                                <div key={task.task_id} className="card p-5 shadow-sm border border-black/5">
+                    <div className="space-y-4">
+                        {tasks.length === 0 && !loading ? (
+                            <div className="card p-12 text-center">
+                                <p className="font-black opacity-30 text-lg uppercase tracking-tighter">No sync tasks found</p>
+                                <button onClick={() => setView('create')} className="text-blue-500 font-bold text-sm mt-2">Create your first bridge →</button>
+                            </div>
+                        ) : (
+                            tasks.map(task => (
+                                <div key={task.task_id} className="card p-6 border border-black/5">
                                     <div className="flex justify-between items-start mb-4">
-                                        <div>
-                                            <p className="text-[10px] font-bold text-blue-500 uppercase mb-1">ID: {task.task_id}</p>
-                                            <h4 className="font-black text-lg">{task.source_chat_title}</h4>
-                                            <p className="text-xs opacity-50 font-bold">To: {task.destination_chat_title}</p>
+                                        <div className="flex-1 pr-4">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Stream #{task.task_id}</span>
+                                                {task.is_enabled ? <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> : <span className="w-2 h-2 rounded-full bg-red-500"></span>}
+                                            </div>
+                                            <h4 className="font-extrabold text-lg line-clamp-1 leading-tight">{task.source_chat_title}</h4>
+                                            <p className="text-[11px] font-bold opacity-40 flex items-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path></svg>
+                                                {task.destination_chat_title}
+                                            </p>
                                         </div>
                                         <button 
                                             onClick={() => toggleTask(task.task_id, task.is_enabled)}
-                                            className={`px-4 py-2 rounded-full text-[10px] font-black transition-all ${task.is_enabled ? 'bg-green-500 text-white' : 'bg-red-500/10 text-red-500'}`}
+                                            className={`px-4 py-2 rounded-2xl text-[10px] font-black transition-all ${task.is_enabled ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}
                                         >
-                                            {task.is_enabled ? 'ACTIVE' : 'PAUSED'}
+                                            {task.is_enabled ? 'RUNNING' : 'PAUSED'}
                                         </button>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <div className="bg-black/5 px-3 py-1 rounded-lg text-[10px] font-bold">⏱️ {task.forward_delay}s Delay</div>
-                                        {task.translate_to && task.translate_to !== 'none' && (
-                                            <div className="bg-purple-500/10 text-purple-500 px-3 py-1 rounded-lg text-[10px] font-bold uppercase">🌐 {task.translate_to}</div>
-                                        )}
+                                    
+                                    <div className="flex items-center justify-between pt-4 border-t border-black/[0.03]">
+                                        <div className="flex gap-2">
+                                            <div className="bg-black/5 px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-widest opacity-60">⏱️ {task.forward_delay}s</div>
+                                            {task.translate_to && task.translate_to !== 'none' && (
+                                                <div className="bg-purple-500/10 text-purple-600 px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-widest">🌐 {task.translate_to}</div>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <button className="p-2 opacity-30 hover:opacity-100 transition-opacity"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg></button>
+                                            <button onClick={() => deleteTask(task.task_id)} className="p-2 text-red-500/40 hover:text-red-500 transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                                        </div>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Pro Tools Grid */}
-                    <div className="mt-12 grid grid-cols-2 gap-4">
-                        <Tool icon="💧" title="Watermark" />
-                        <Tool icon="🤖" title="AI Rewrite" />
-                        <Tool icon="📊" title="Logs" />
-                        <Tool icon="⚙️" title="Expert" />
+                            ))
+                        )}
                     </div>
-                </div>
-            );
-        }
-
-        function Tool({ icon, title }) {
-            return (
-                <div className="card p-4 flex items-center gap-3 shadow-sm border border-black/5 opacity-50 grayscale cursor-not-allowed">
-                    <span className="text-xl">{icon}</span>
-                    <span className="font-black text-xs uppercase">{title}</span>
                 </div>
             );
         }

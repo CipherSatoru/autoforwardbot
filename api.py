@@ -113,6 +113,18 @@ async def delete_task(task_id: int, user=Depends(get_current_user)):
     await db.delete_task(task_id)
     return {"status": "deleted"}
 
+@app.get("/api/chats/sources")
+async def get_recent_sources(user=Depends(get_current_user)):
+    """Fetch recent source chats for selection"""
+    sources = await db.get_recent_sources(user['id'], limit=20)
+    return sources
+
+@app.get("/api/chats/destinations")
+async def get_recent_destinations(user=Depends(get_current_user)):
+    """Fetch recent destination chats for selection"""
+    dests = await db.get_recent_destinations(user['id'], limit=20)
+    return dests
+
 @app.get("/api/stats")
 async def get_stats(user=Depends(get_current_user)):
     """Get user stats for the dashboard"""
