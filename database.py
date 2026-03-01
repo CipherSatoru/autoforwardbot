@@ -174,6 +174,18 @@ class Database:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
     
+    async def get_tasks_by_source(self, source_chat_id: int) -> List[Dict]:
+        """Get all active tasks for a specific source chat ID"""
+        async with aiosqlite.connect(self.db_file) as db:
+            db.row_factory = aiosqlite.Row
+            # We use CAST(source_chat_id AS TEXT) if it's stored as text, 
+            # but schema says INTEGER. Let's try matching both or use simple match.
+            async with db.execute('''
+                SELECT * FROM forward_tasks WHERE source_chat_id = ? AND is_enabled = 1
+            ''', (source_chat_id,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+    
     async def update_task(self, task_id: int, **kwargs):
         async with aiosqlite.connect(self.db_file) as db:
             for key, value in kwargs.items():

@@ -467,43 +467,59 @@ async def addfilter_mode_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def removefilter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles callback for removing filters (requires filter_id)"""
+    """Handles callback or command for removing filters (requires filter_id)"""
     query = update.callback_query
-    await query.answer()
-    
-    data_parts = query.data.split("_")
-    if len(data_parts) < 2 or data_parts[0] != "removefilter":
-        await query.message.reply_text("❌ Invalid callback data.")
-        return ConversationHandler.END
-        
-    try:
-        filter_id = int(data_parts[1])
-        # To safely remove, we should ideally know the task_id associated with this filter.
-        # This callback handler would ideally be invoked from a context where task_id is known,
-        # or the filter_id itself is unique enough or linked back to task_id in DB.
-        # Assuming filter_id is unique enough for now.
-        await db.delete_filter(filter_id)
-        await query.message.reply_text(f"✅ Filter <code>{filter_id}</code> removed.", parse_mode=ParseMode.HTML)
-    except ValueError:
-        await query.message.reply_text("❌ Invalid filter ID. Please provide a number.")
-    except Exception as e:
-        await query.message.reply_text(f"❌ Error removing filter: {str(e)}")
-    
-    # After removal, refresh the filter list or go back to previous menu
-    # Navigating back to the edit task menu is a reasonable default.
-    # If filter_id was somehow tied to task_id, we could go back to viewfilters.
-    # For simplicity, let's go back to the task edit menu.
-    # Need to extract task_id from the removed filter's context if possible, or from user_data if set earlier.
-    # If user_data['current_task_id'] is available, use that. Otherwise, inform user.
-    task_id = context.user_data.get('current_task_id') # Check if available from previous state
-    if task_id:
-        await query.message.reply_text("You can now select another option from the edit task menu.",
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Edit Task", callback_data=f"edittask_{task_id}")]]))
-    else:
-        await query.message.reply_text("Filter removed. You may need to use /mytasks or /edittask again.")
-    
-    return ConversationHandler.END
 
+    filter_id = None
+    if query:
+        await query.answer()
+        data_parts = query.data.split("_")
+        if len(data_parts) >= 2 and data_parts[0] == "removefilter":
+            try:
+                filter_id = int(data_parts[1])
+            except ValueError:
+                pass
+    else:
+        # Command version: /removefilter [filter_id]
+        if context.args:
+            try:
+                filter_id = int(context.args[0])
+            except ValueError:
+                pass
+
+    if filter_id is None:
+        message = "❌ Invalid filter ID. Please provide a number.\nUsage: `/removefilter [filter_id]`"
+        if query:
+            await query.message.reply_text(message)
+        else:
+            await update.message.reply_text(message)
+        return ConversationHandler.END
+
+    try:
+        await db.delete_filter(filter_id)
+        message = f"✅ Filter <code>{filter_id}</code> removed."
+        if query:
+            await query.message.reply_text(message, parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(message, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        message = f"❌ Error removing filter: {str(e)}"
+        if query:
+            await query.message.reply_text(message)
+        else:
+            await update.message.reply_text(message)
+        return ConversationHandler.END
+
+    # After removal, try to go back to manage filters if possible
+    task_id = context.user_data.get('current_task_id')
+    if task_id:
+        # If it was a callback, we can show the menu again
+        if query:
+            return await manage_filters_menu(update, context)
+        else:
+            await update.message.reply_text(f"You can view updated filters with `/filters {task_id}`")
+
+    return ConversationHandler.END
 
 async def filters_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /filters command to list filters for a task."""
@@ -549,6 +565,67 @@ async def filters_command_handler(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("❌ Invalid task ID. Please provide a number.")
     except Exception as e:
         await update.message.reply_text(f"❌ Error listing filters: {str(e)}")
+
+async def manage_filters_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows the manage filters menu for a task (callback version)."""
+    query = update.callback_query
+    
+    # Try to get task_id from callback data or user_data
+    task_id = None
+    if query:
+        await query.answer()
+        data = query.data
+        if data.startswith("manage_filters_"):
+            try:
+                task_id = int(data.split("_")[2])
+            except (IndexError, ValueError):
+                pass
+        
+    if not task_id:
+        task_id = context.user_data.get('current_task_id')
+
+    if not task_id:
+        if query:
+            await query.message.edit_text("❌ Error: Task ID not found. Please use `/edittask [task_id]`.")
+        else:
+            await update.message.reply_text("❌ Error: Task ID not found. Please use `/edittask [task_id]`.")
+        return ConversationHandler.END
+
+    # Set as current task for context
+    context.user_data['current_task_id'] = task_id
+
+    try:
+        filters_list = await db.get_task_filters(task_id)
+        
+        text = f"🛠️ <b>Manage Filters for Task {task_id}:</b>\n\n"
+        if not filters_list:
+            text += "📭 No filters for this task."
+        else:
+            for f in filters_list:
+                mode = "🟢 Whitelist" if f['is_whitelist'] else "🔴 Blacklist"
+                text += f"🆔 <code>{f['filter_id']}</code> - <b>{f['filter_type'].capitalize()}</b>\n"
+                text += f"Value: <code>{f['filter_value']}</code> ({mode})\n"
+                text += f"❌ To remove: <code>/removefilter {f['filter_id']}</code>\n\n"
+
+        keyboard = [
+            [InlineKeyboardButton("➕ Add Filter", callback_data=f"addfilter_{task_id}")],
+            [InlineKeyboardButton("🔙 Back to Edit Task", callback_data=f"edittask_{task_id}")]
+        ]
+        
+        if query:
+            await query.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+            
+        return STATE_MANAGE_FILTERS
+    except Exception as e:
+        logger.error(f"Error in manage_filters_menu: {e}")
+        if query:
+            await query.message.reply_text(f"❌ Error: {str(e)}")
+        return ConversationHandler.END
+
+# Alias for compatibility with some references
+filters_command_callback_handler = manage_filters_menu
 
 # ========== SETTINGS COMMANDS (UPDATED FOR CONTEXT) ==========
 async def setdelay(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1127,6 +1204,62 @@ add_filter_conv_handler = ConversationHandler(
 )
 
 
+async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming messages (forwarding logic)"""
+    # Determine the message source (private chat message or channel post)
+    message = update.message or update.channel_post
+    if not message:
+        return
+
+    # Check for new task flow (structured via ConversationHandler states)
+    # The ConversationHandler should normally catch these if the flow is active,
+    # but some legacy code uses user_data flags.
+    if context.user_data.get('awaiting_source'):
+        return await handle_source_selection(update, context)
+    elif context.user_data.get('awaiting_dest'):
+        return await handle_dest_selection(update, context)
+
+    # Check if this message is a setting input (e.g., delay, header, footer)
+    # This is often handled by specific commands, but checking here for completeness
+    editing_task_id = context.user_data.get('editing_setting_for_task')
+    if editing_task_id:
+        # Example: handle delay setting via direct text input if prompted
+        setting_type = context.user_data.get('editing_setting_type')
+        if setting_type == 'delay':
+             try:
+                 delay = int(message.text)
+                 await db.update_task(editing_task_id, forward_delay=delay)
+                 await message.reply_text(f"✅ Delay updated to {delay}s for task {editing_task_id}.")
+                 context.user_data.pop('editing_setting_for_task', None)
+                 context.user_data.pop('editing_setting_type', None)
+                 return
+             except ValueError:
+                 await message.reply_text("❌ Please enter a valid number for delay.")
+                 return
+
+    # MAIN FORWARDING LOGIC
+    # We use chat_id (source) to find any active tasks
+    chat_id = message.chat.id
+    
+    # Get all active tasks for this source chat
+    tasks = await db.get_tasks_by_source(chat_id)
+    if not tasks:
+        return
+
+    for task in tasks:
+        # The db query already filters for is_enabled = 1, but double check
+        if not task.get('is_enabled', 1):
+            continue
+        
+        # Get filters for this task
+        filters_list = await db.get_task_filters(task['task_id'])
+        
+        # Forward via engine
+        # forward_engine.forward_message(bot, message, task, filters_list)
+        # Note: forward_engine should be imported from forwarder
+        await forward_engine.forward_message(context.bot, message, task, filters_list)
+
+
 # ========== MAIN FUNCTION ==========
 async def main():
     """Start the bot"""
@@ -1153,8 +1286,8 @@ async def main():
     
     # Filter management commands (entry points for conversation)
     application.add_handler(CommandHandler("addfilter", addfilter_start)) # Command to start adding a filter
-    application.add_handler(CommandHandler("removefilter", removefilter)) # Command to remove a filter by ID
-    application.add_handler(CommandHandler("filters", filters_command)) # Command to list filters for a task
+    application.add_handler(CommandHandler("removefilter", removefilter_callback)) # Command to remove a filter by ID
+    application.add_handler(CommandHandler("filters", filters_command_handler)) # Command to list filters for a task
     
     # Settings commands
     application.add_handler(CommandHandler("setdelay", setdelay))
